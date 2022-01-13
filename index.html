@@ -254,7 +254,7 @@
 </head>
 <body style="margin: 0; overflow: hidden;">
   <audio id="backing">
-    <source src="./assets/sound.mp3" type="audio/mpeg">
+    <source id="sound-asset"  type="audio/mpeg">
   </audio>
   <input type="button" id="toggle" class="on" onclick="togglestyle(this)" />
   <a-scene 
@@ -264,7 +264,7 @@
     vr-mode-ui="enabled: false"
     arjs="sourceType: webcam; debugUIEnabled: false;">
     <a-assets  timeout="1000000">
-      <a-asset-item id="model-asset" src="https://cdn.jsdelivr.net/gh/RescueStationCIC/opensourceglb/models/spinosaurus/spinosaurus.glb"></a-asset-item>
+      <a-asset-item id="model-asset" ></a-asset-item>
     </a-assets>
     <a-entity
       id="correction"
@@ -324,7 +324,14 @@
           dist: parseFloat(urlParams.get('dist'))
         }
       }
+      
+      var show_cam = true;
+      if (urlParams.get('show_cam')=='false'){
+        show_cam = false;
+      }
+
       console.log(simulate);
+      consol.log(`show_cam=${show_cam}`);
 
       var params = JSON.parse(atob(urlParams.get('params')));
 
@@ -343,6 +350,8 @@
         opacity: parseFloat(urlParams.get('opacity')),
         period_s: parseFloat(urlParams.get('period_s')),
         model_height_m: parseFloat(urlParams.get('model_height_m')),
+        model_url: urlParams.get('model_url'),
+        sound_url: urlParams.get('sound_url'),
         
         c_x: parseFloat(urlParams.get('c_x')),
         c_y: parseFloat(urlParams.get('c_y')),
@@ -354,6 +363,7 @@
       };
     }
     params.simulate = simulate;
+    params.show_cam = show_cam;
 
 
     console.log("using the following params:");
@@ -379,6 +389,18 @@
   const OFFSET_BY_DEG = 70;
   const OFFSET_BY_M = 0;
 
+
+  function addModel(params){
+    var el = document.querySelector('#model-asset');
+    el.setAttribute('src',params.model_url);
+  }
+
+  function addSound(params){
+    var el = document.querySelector('#sound-asset');
+    el.setAttribute('src',params.sound_url);
+  }
+
+
   //THANKYOU: https://stackoverflow.com/a/61443888
   function changeReadOnlyLocations(params){
     console.log("changeReadOnlyLocations");
@@ -395,31 +417,35 @@
       gps.value  = loc;
       el.setAttributeNode(gps);
 
-      if(params.simulate){
-
-        let bearing = OFFSET_BY_DEG;
-        if(!isNaN(params.simulate.bearing)){
-          bearing = params.simulate.bearing;
-        }
-        let dist = OFFSET_BY_M;
-        if(!isNaN(params.simulate.dist)){
-          dist = params.simulate.dist;
-        }       
-
-
-        const offset = translateOnEarth(params.lat, params.lon, bearing, dist);
-        const sim = `simulateLatitude: ${offset.lat}; simulateLongitude: ${offset.lon};`;
-
-        console.log('simulating location');
-        console.log(`input coordinates:`);
-        console.log(loc);
-        console.log('simulated camera position');
-        console.log(sim);
-        
         var cameraEl = sceneEl.querySelector('a-camera');
-        cameraEl.setAttribute('gps-camera',sim);
 
-      }
+
+
+        if(params.simulate){
+
+          let bearing = OFFSET_BY_DEG;
+          if(!isNaN(params.simulate.bearing)){
+            bearing = params.simulate.bearing;
+          }
+          let dist = OFFSET_BY_M;
+          if(!isNaN(params.simulate.dist)){
+            dist = params.simulate.dist;
+          }       
+
+
+          const offset = translateOnEarth(params.lat, params.lon, bearing, dist);
+          const sim = `simulateLatitude: ${offset.lat}; simulateLongitude: ${offset.lon};`;
+
+          console.log('simulating location');
+          console.log(`input coordinates:`);
+          console.log(loc);
+          console.log('simulated camera position');
+          console.log(sim);
+          cameraEl.setAttribute('gps-camera',sim);
+
+
+        }
+      
 
     } else {
       console.log("No coordinates found.");
@@ -451,6 +477,8 @@
 
     var params = processParams();
     console.log("*** 1 ***");
+    addModel(params);
+    addSound(params);
     changeReadOnlyLocations(params);
     makeCorrections(params);
     console.log("*** 2 ***");
