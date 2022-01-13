@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <script src="https://aframe.io/releases/1.2.0/aframe.min.js" ></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js" ></script>
+  
+
+
+
+
+<script>
+  AFRAME.registerComponent('opacitychanger', {
+
+  init: function () {
+    console.log("*** 3 ***");
+    this.el.addEventListener('model-loaded', () =>{
+      console.log("opacitychanger:init");
+      var params = window.reallyHackyGlobalLocation;
+      var opacity = params.opacity;
+      if (isNaN(opacity)){
+        opacity = 1.0; // default
+      }
+      var mesh = this.el.getObject3D('mesh');
+      if (!!mesh) {  
+        mesh.traverse(function (node) {
+          if (node.isMesh) {
+            node.material.opacity = opacity;
+            node.material.transparent = opacity < 1.0;
+            node.material.needsUpdate = true;
+          }
+        });
+      }else{
+        console.log("no nodes found");
+      }
+
+
+    });
+  }
+});
+</script>
+
+<script>
+  AFRAME.registerComponent('spatialchanger', {
+
+
+  init: function () {
+
+    function findScaleFactor( height_m, model_height_m, reported_height_m){
+      // THANKYOU: https://stackoverflow.com/a/52271526
+  
+      var SFmodel = model_height_m / reported_height_m;
+
+      var SFdesired = height_m / model_height_m;
+      
+      var SFall = SFmodel * SFdesired;
+
+      return SFall;
+    }
+
+    function getBoundingBox(meshes){
+      var boundingBox = new THREE.Box3();
+      component.meshes.forEach(function(mesh){
+          box = new THREE.Box3().setFromObject(mesh);
+          boundingBox.union(box);
+      });
+      return boundingBox;
+    }
+
+
+
+    function beginTransforms(component){
+      component.readyForTicks = false;
+      component.center = null;
+      component.meshes = [];
+      component.parent = component.el.getObject3D('mesh');
+;
+  
+
+      // store meshes, so they are not retraversed on each tick
+      var meshes = component.meshes;
+      var parent = component.parent;
+      if (!!parent) { 
+        parent.traverse(function (node) {
+          if (node.isMesh) {
+            meshes.push(node);
+          }
+        });
+      }
+
+      if(meshes.length > 0){
+          var boundingBox = getBoundingBox(meshes);
+          component.center = boundingBox.getCenter();
+          var size = boundingBox.getSize(new THREE.Vector3());
+          component.reported_height_m = size.y;
+      }
+
+    }
+
+
+
+
+
+
+    function positionAndScale(component, scale, alt_m){
+      
+
+      function moveCenterToOrigin(mesh, center){
+        mesh.geometry.applyMatrix4(new THREE.Matrix4().makeTranslation(mesh.position.x-center.x, mesh.position.y-center.y, mesh.position.z-center.z));  
+      }
+
+      function doScale(mesh, scale) {
+        mesh.geometry.applyMatrix4(new THREE.Matrix4().makeScale(scale, scale, scale));  
+      }
+
+      function positionVertical(mesh, y_m){
+        mesh.geometry.applyMatrix4(new THREE.Matrix4().makeTranslation(0, y_m, 0));  
+      }
+      
+      component.meshes.forEach(function(mesh){
+        moveCenterToOrigin(mesh, component.center);
+      });
+
+      component.meshes.forEach(function(mesh){
+        doScale(mesh, scale ); 
+      });
+
+      var bb = getBoundingBox(component.meshes);
+      var height = bb.getSize(new THREE.Vector3()).y;
+      var center = bb.getCenter();
+
+      component.meshes.forEach(function(mesh){
+        moveCenterToOrigin(mesh, center); 
+      });
+
+      component.meshes.forEach(function(mesh){
+        positionVertical(mesh, (height / 2) + alt_m); 
+      });
+
+      component.center = center; 
+
+
+    }
+
+
+
+
+    function beginRotation(component, period_s, sectorsperrev){
+        let tickTime_ms = period_s / sectorsperrev * 1000;
+        component.tick = AFRAME.utils.throttleTick(component.tick, tickTime_ms, component);
+        component.radspersector = 2 * Math.PI / sectorsperrev;
+        component.readyForTicks = true;
+    }
+
+    console.log("spatialchanger:init");
+  
+    var params = window.reallyHackyGlobalLocation;
+    var period_s = params.period_s;
+    var sectorsperrev= params.sectorsperrev;
+    var height_m = params.height_m;
+    var alt_m = params.alt_m;
+    var model_height_m = params.model_height_m;
+
+
+    if (isNaN(period_s)){
+      period_s = 0; //default, no rotation
+    }
+    if((isNaN(sectorsperrev)) || (sectorsperrev == 0) ){
+      sectorsperrev = 300; // default
+    }
+
+    if(isNaN(alt_m)){
+      alt_m = 0; //default. Bottom of bounding box is on ground
+    }
+
+    if(isNaN(height_m) || (height_m == 0)){
+      height_m = 1.8; //default. Size is human scale.
+    }
+
+    var component = this;
+
+    this.el.addEventListener('model-loaded', (event) =>{
+      console.log("model loaded");
+      var gltf = {
+        scene: event.detail.model
+      };
+      // gathers transform data and stores it in the component
+      beginTransforms(component);
+
+      var scale = 1.0;
+      if((!isNaN(model_height_m) && model_height_m != 0)){
+        scale = findScaleFactor( height_m, model_height_m, component.reported_height_m);
+      }
+
+      // applies transforms for position and scale
+      positionAndScale(component, scale, alt_m);
+
+      if(period_s > 0){
+        // sets up rotation data and stores it in the component, sets up tick rate
+        beginRotation(component, period_s, sectorsperrev);
+      }
+      
+    });
+    
+    
+  },
+
+    tick: function () {
+      // THANK YOU: https://stackoverflow.com/questions/64218715/how-do-i-rotate-a-mesh-group-about-the-axis-of-a-random-3d-object-mesh-3d-line-w
+      const rotateAbout = function (mesh, axis, axisPosition, angle) {
+        mesh.geometry.applyMatrix4(new THREE.Matrix4().makeTranslation(mesh.position.x-axisPosition.x, mesh.position.y-axisPosition.y, mesh.position.z-axisPosition.z));  //translate geometry to axis location
+        mesh.geometry.applyMatrix4(new THREE.Matrix4().makeRotationAxis(axis, angle));    //rotate geometry about axis  
+        mesh.geometry.applyMatrix4(new THREE.Matrix4().makeTranslation(axisPosition.x-mesh.position.x, axisPosition.y-mesh.position.y, axisPosition.z-mesh.position.z));  //translate geometry back to original location
+
+      }
+
+      if(this.readyForTicks){
+        var meshes = this.meshes;
+        var center = this.center;
+        var rotation = this.radspersector;
+        var corrections = this.corrections;
+        meshes.forEach(function(mesh){
+            rotateAbout(mesh, new THREE.Vector3(0,1,0), center, rotation, corrections); 
+          });
+      }
+    },
+});
+</script>
+
+<style>
+  .on {
+    background: url(./assets/Speaker_Icon.svg) no-repeat 50% 50%;
+    background-size: contain;
+    position: absolute;
+    border: none;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 5em;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10;
+  }
+
+  .on.off {
+    background: url(./assets/Mute_Icon.svg)  no-repeat 50% 50%;
+    background-size: contain;
+  }
+</style>
+
+</head>
+<body style="margin: 0; overflow: hidden;">
+  <audio id="backing">
+    <source src="./assets/sound.mp3" type="audio/mpeg">
+  </audio>
+  <input type="button" id="toggle" class="on" onclick="togglestyle(this)" />
+  <a-scene 
+
+    renderer="logarithmicDepthBuffer: false;"
+    embedded
+    vr-mode-ui="enabled: false"
+    arjs="sourceType: webcam; debugUIEnabled: false;">
+    <a-assets  timeout="1000000">
+      <a-asset-item id="model-asset" src="https://cdn.jsdelivr.net/gh/RescueStationCIC/opensourceglb/models/spinosaurus/spinosaurus.glb"></a-asset-item>
+    </a-assets>
+    <a-entity
+      id="correction"
+      >
+      
+    <a-entity 
+      id="model"
+      gltf-model="#model-asset"
+      opacitychanger
+      spatialchanger
+      >
+
+    </a-entity>
+    </a-entity>
+
+
+    <a-camera look-controls-enabled='false' arjs-look-controls='smoothingFactor: 0.1' gps-camera  read-rotation ></a-camera>
+  </a-scene>
+</body>
+
+<script language="javascript">
+  var backingEl = document.getElementById("backing");
+  var toggleEl = document.getElementById("toggle");
+
+  function onPlay(){
+      backingEl.play();
+      toggleEl.className="on off";
+  }
+
+  function onPause(){
+    backingEl.pause();
+    toggleEl.className="on";
+  }
+
+  function togglestyle(el){      
+      if(el.className == "on") {
+        onPlay();
+      } else {
+        onPause();
+      }
+  }
+
+  backingEl.onended = function(event){
+    onPause();
+  }
+</script>
+<script>
+
+  function processParams(){
+    console.log("processParams");
+    const urlParams = new URLSearchParams(window.location.search);
+    try {
+      var simulate = null;
+      if (urlParams.get('simulate')=='true'){
+        simulate = {
+          bearing: parseFloat(urlParams.get('bearing')),
+          dist: parseFloat(urlParams.get('dist'))
+        }
+      }
+      console.log(simulate);
+
+      var params = JSON.parse(atob(urlParams.get('params')));
+
+      if (null == params) {
+        throw "Combo parse failed.";
+      } else {
+        console.log("Successfully parsed encoded params");
+      }
+    } catch (e) {
+      console.log("Combo failed. Dropping through to individual params");
+      var params = {
+        lat: parseFloat(urlParams.get('lat')),
+        lon: parseFloat(urlParams.get('lon')),
+        alt_m: parseFloat(urlParams.get('alt_m')),
+        height_m: parseFloat(urlParams.get('height_m')),
+        opacity: parseFloat(urlParams.get('opacity')),
+        period_s: parseFloat(urlParams.get('period_s')),
+        model_height_m: parseFloat(urlParams.get('model_height_m')),
+        
+        c_x: parseFloat(urlParams.get('c_x')),
+        c_y: parseFloat(urlParams.get('c_y')),
+        c_z: parseFloat(urlParams.get('c_z')),
+        c_rx: parseFloat(urlParams.get('c_rx')),
+        c_ry: parseFloat(urlParams.get('c_ry')),
+        c_rz: parseFloat(urlParams.get('c_rz'))
+
+      };
+    }
+    params.simulate = simulate;
+
+
+    console.log("using the following params:");
+    console.log(params);
+    return params;
+  }
+
+  const EARTH_RADIUS = 6378137; // assume earth is sphere
+
+  //THANKYOU: http://gis.stackexchange.com/questions/2951/algorithm-for-offsetting-a-latitude-longitude-by-some-amount-of-meters
+  function translateOnEarth (in_lat, in_lon, heading_deg, distance_m) {
+    const degToRad = THREE.Math.degToRad;  
+    const radToDeg = THREE.Math.radToDeg;  
+    const dLat = distance_m * Math.cos(degToRad(heading_deg)) / EARTH_RADIUS;
+    const dLon = distance_m * Math.sin(degToRad(heading_deg)) / (EARTH_RADIUS * Math.cos(degToRad(in_lat)));
+
+    return {
+      lat: in_lat + radToDeg(dLat), 
+      lon: in_lon + radToDeg(dLon)
+    }
+  }
+
+  const OFFSET_BY_DEG = 70;
+  const OFFSET_BY_M = 0;
+
+  //THANKYOU: https://stackoverflow.com/a/61443888
+  function changeReadOnlyLocations(params){
+    console.log("changeReadOnlyLocations");
+
+    var sceneEl = document.querySelector('a-scene');
+    var el = sceneEl.querySelector("#model");
+
+    console.log("processing location");
+
+    if (!isNaN(params.lon) && !isNaN(params.lon)) {
+      const loc = `latitude: ${params.lat}; longitude: ${params.lon};`;
+      console.log(`input coordinates: ${loc}`);
+      var gps = document.createAttribute("gps-entity-place");
+      gps.value  = loc;
+      el.setAttributeNode(gps);
+
+      if(params.simulate){
+
+        let bearing = OFFSET_BY_DEG;
+        if(!isNaN(params.simulate.bearing)){
+          bearing = params.simulate.bearing;
+        }
+        let dist = OFFSET_BY_M;
+        if(!isNaN(params.simulate.dist)){
+          dist = params.simulate.dist;
+        }       
+
+
+        const offset = translateOnEarth(params.lat, params.lon, bearing, dist);
+        const sim = `simulateLatitude: ${offset.lat}; simulateLongitude: ${offset.lon};`;
+
+        console.log('simulating location');
+        console.log(`input coordinates:`);
+        console.log(loc);
+        console.log('simulated camera position');
+        console.log(sim);
+        
+        var cameraEl = sceneEl.querySelector('a-camera');
+        cameraEl.setAttribute('gps-camera',sim);
+
+      }
+
+    } else {
+      console.log("No coordinates found.");
+    }
+  }
+
+  function makeCorrections(params){
+    var c_x = params.c_x;
+    var c_y = params.c_y;
+    var c_z = params.c_z;
+    var c_rx = params.c_rx;
+    var c_ry = params.c_ry;
+    var c_rz = params.c_rz;
+
+    var c = {
+        x:  isNaN(c_x)?0.0:c_x,
+        y: isNaN(c_y)?0.0:c_y,
+        z: isNaN(c_z)?0.0: c_z,
+        rx:  isNaN(c_x)?0.0:c_rx,
+        ry: isNaN(c_y)?0.0:c_ry,
+        rz: isNaN(c_z)?0.0: c_rz
+    }
+    var sceneEl = document.querySelector('a-scene');
+    var el = sceneEl.querySelector("#correction");
+    el.setAttribute('position', `${c.x} ${c.y} ${c.z}`);
+    el.setAttribute('rotation', `${c.rx} ${c.ry} ${c.rz}`);
+  }
+
+
+    var params = processParams();
+    console.log("*** 1 ***");
+    changeReadOnlyLocations(params);
+    makeCorrections(params);
+    console.log("*** 2 ***");
+    window.reallyHackyGlobalLocation = params;
+    
+
+</script>
+
+
+</html>
